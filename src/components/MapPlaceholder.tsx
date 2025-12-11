@@ -1,5 +1,8 @@
-import React from 'react';
-import { MapPin } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
+import { MapPin, Loader2 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 
 interface Event {
   id: string;
@@ -21,119 +24,180 @@ const MapPlaceholder: React.FC<MapPlaceholderProps> = ({
   userLocation,
   onEventClick 
 }) => {
-  return (
-    <div className="relative w-full h-full bg-gradient-to-b from-green-100 to-green-50 overflow-hidden">
-      {/* Map background pattern */}
-      <div className="absolute inset-0 opacity-30">
-        <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
-              <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#a3a3a3" strokeWidth="0.5"/>
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
-        </svg>
-      </div>
+  const mapContainer = useRef<HTMLDivElement>(null);
+  const map = useRef<mapboxgl.Map | null>(null);
+  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const userMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-      {/* Fake streets */}
-      <div className="absolute inset-0">
-        <div className="absolute top-1/4 left-0 right-0 h-8 bg-gray-200/60" />
-        <div className="absolute top-1/2 left-0 right-0 h-12 bg-gray-300/60" />
-        <div className="absolute top-3/4 left-0 right-0 h-6 bg-gray-200/60" />
-        <div className="absolute left-1/4 top-0 bottom-0 w-6 bg-gray-200/60" />
-        <div className="absolute left-1/2 top-0 bottom-0 w-10 bg-gray-300/60" />
-        <div className="absolute left-3/4 top-0 bottom-0 w-8 bg-gray-200/60" />
-      </div>
+  // Initialize map
+  useEffect(() => {
+    if (!mapContainer.current || map.current) return;
 
-      {/* User location */}
-      {userLocation && (
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20">
-          {/* Pulse effect */}
-          <div className="absolute inset-0 w-16 h-16 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/30 pulse-animation" />
-          {/* Blue dot */}
-          <div className="w-6 h-6 rounded-full bg-primary border-4 border-primary-foreground shadow-lg" />
-        </div>
-      )}
+    const initMap = async () => {
+      try {
+        // Fetch Mapbox token from edge function
+        const { data, error: fnError } = await supabase.functions.invoke('get-mapbox-token');
+        
+        if (fnError || !data?.token) {
+          throw new Error('Não foi possível carregar o token do Mapbox');
+        }
 
-      {/* Heat map effect for events cluster */}
-      {events.length > 0 && (
-        <div 
-          className="absolute w-32 h-32 rounded-full opacity-60"
-          style={{
-            top: '35%',
-            left: '40%',
-            background: 'radial-gradient(circle, hsl(142 76% 36% / 0.6) 0%, hsl(38 92% 50% / 0.4) 40%, transparent 70%)',
-          }}
-        />
-      )}
+        mapboxgl.accessToken = data.token;
 
-      {/* Event markers */}
-      {events.slice(0, 5).map((event, index) => {
-        // Position events around the map
-        const positions = [
-          { top: '30%', left: '60%' },
-          { top: '55%', left: '25%' },
-          { top: '70%', left: '70%' },
-          { top: '20%', left: '35%' },
-          { top: '65%', left: '45%' },
-        ];
-        const pos = positions[index] || positions[0];
+        const initialCenter: [number, number] = userLocation 
+          ? [userLocation.lng, userLocation.lat] 
+          : [-46.6333, -23.5505]; // São Paulo default
 
-        return (
-          <button
-            key={event.id}
-            onClick={() => onEventClick(event)}
-            className="absolute transform -translate-x-1/2 -translate-y-full z-10 group"
-            style={{ top: pos.top, left: pos.left }}
-          >
-            <div className="relative">
-              {/* Shadow */}
-              <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-2 bg-black/20 rounded-full blur-sm" />
-              
-              {/* Pin */}
-              <div className="relative">
-                <div className="w-10 h-10 rounded-full vibe-gradient flex items-center justify-center shadow-lg 
-                              transform transition-transform group-hover:scale-110">
-                  {event.media_url ? (
-                    <img 
-                      src={event.media_url} 
-                      alt={event.name}
-                      className="w-8 h-8 rounded-full object-cover"
-                    />
-                  ) : (
-                    <MapPin className="w-5 h-5 text-accent-foreground" />
-                  )}
-                </div>
-                {/* Pin tail */}
-                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-0 h-0 
-                              border-l-[6px] border-l-transparent 
-                              border-r-[6px] border-r-transparent 
-                              border-t-[8px] border-t-accent" />
-              </div>
-            </div>
-          </button>
+        map.current = new mapboxgl.Map({
+          container: mapContainer.current!,
+          style: 'mapbox://styles/mapbox/dark-v11',
+          center: initialCenter,
+          zoom: 14,
+          pitch: 45,
+        });
+
+        map.current.addControl(
+          new mapboxgl.NavigationControl({ visualizePitch: true }),
+          'top-right'
         );
-      })}
 
-      {/* Location info overlay */}
-      {!userLocation && (
-        <div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-          <div className="text-center p-6">
-            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
-              <MapPin className="w-8 h-8 text-muted-foreground" />
-            </div>
-            <h3 className="text-lg font-semibold text-foreground mb-2">
-              Ative sua localização
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Para ver eventos próximos, permita o acesso à sua localização
-            </p>
+        map.current.addControl(
+          new mapboxgl.GeolocateControl({
+            positionOptions: { enableHighAccuracy: true },
+            trackUserLocation: true,
+            showUserHeading: true,
+          }),
+          'top-right'
+        );
+
+        map.current.on('load', () => {
+          setMapLoaded(true);
+          setLoading(false);
+        });
+
+      } catch (err) {
+        console.error('Error initializing map:', err);
+        setError(err instanceof Error ? err.message : 'Erro ao carregar mapa');
+        setLoading(false);
+      }
+    };
+
+    initMap();
+
+    return () => {
+      map.current?.remove();
+      map.current = null;
+    };
+  }, []);
+
+  // Update map center when user location changes
+  useEffect(() => {
+    if (map.current && userLocation && mapLoaded) {
+      map.current.flyTo({
+        center: [userLocation.lng, userLocation.lat],
+        zoom: 14,
+        duration: 1500,
+      });
+
+      // Add/update user marker
+      if (userMarkerRef.current) {
+        userMarkerRef.current.setLngLat([userLocation.lng, userLocation.lat]);
+      } else {
+        const el = document.createElement('div');
+        el.className = 'user-marker';
+        el.innerHTML = `
+          <div class="relative">
+            <div class="absolute inset-0 w-8 h-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-500/30 animate-ping"></div>
+            <div class="w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow-lg"></div>
+          </div>
+        `;
+        
+        userMarkerRef.current = new mapboxgl.Marker({ element: el })
+          .setLngLat([userLocation.lng, userLocation.lat])
+          .addTo(map.current);
+      }
+    }
+  }, [userLocation, mapLoaded]);
+
+  // Add event markers
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    // Clear existing markers
+    markersRef.current.forEach(marker => marker.remove());
+    markersRef.current = [];
+
+    // Add new markers for each event
+    events.forEach(event => {
+      const el = document.createElement('div');
+      el.className = 'event-marker cursor-pointer';
+      el.innerHTML = `
+        <div class="relative group">
+          <div class="w-12 h-12 rounded-full flex items-center justify-center shadow-lg 
+                      transform transition-transform hover:scale-110"
+               style="background: linear-gradient(135deg, hsl(280, 80%, 50%), hsl(330, 80%, 50%));">
+            ${event.media_url 
+              ? `<img src="${event.media_url}" alt="${event.name}" class="w-10 h-10 rounded-full object-cover" />`
+              : `<svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                         d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                         d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                 </svg>`
+            }
+          </div>
+          <div class="absolute -bottom-2 left-1/2 -translate-x-1/2 w-0 h-0 
+                      border-l-[8px] border-l-transparent 
+                      border-r-[8px] border-r-transparent 
+                      border-t-[10px]"
+               style="border-top-color: hsl(330, 80%, 50%);"></div>
+        </div>
+      `;
+
+      el.addEventListener('click', () => onEventClick(event));
+
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
+        .setLngLat([event.longitude, event.latitude])
+        .addTo(map.current!);
+
+      markersRef.current.push(marker);
+    });
+  }, [events, mapLoaded, onEventClick]);
+
+  if (error) {
+    return (
+      <div className="relative w-full h-full bg-card flex items-center justify-center">
+        <div className="text-center p-6">
+          <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-4">
+            <MapPin className="w-8 h-8 text-destructive" />
+          </div>
+          <h3 className="text-lg font-semibold text-foreground mb-2">
+            Erro ao carregar mapa
+          </h3>
+          <p className="text-sm text-muted-foreground">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative w-full h-full">
+      <div ref={mapContainer} className="absolute inset-0" />
+      
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm z-10">
+          <div className="text-center">
+            <Loader2 className="w-10 h-10 text-primary animate-spin mx-auto mb-4" />
+            <p className="text-muted-foreground">Carregando mapa...</p>
           </div>
         </div>
       )}
 
       {/* Top gradient overlay */}
-      <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-background/50 to-transparent pointer-events-none" />
+      <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-background/50 to-transparent pointer-events-none z-10" />
     </div>
   );
 };
